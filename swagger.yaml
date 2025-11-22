@@ -1,0 +1,888 @@
+openapi: 3.0.3
+info:
+  title: Call Quality Analysis API
+  description: |
+    A tenant-based API system for analyzing call quality through sentiment analysis of conversations.
+    The system supports campaign management, conversation processing, and Q&A functionality.
+    
+    ## Features
+    - Multi-tenant architecture with tenant-based authentication
+    - Campaign management
+    - Conversation processing with sentiment analysis
+    - Question & Answer functionality
+    
+    ## Authentication
+    All endpoints (except `/auth/login`) require JWT token authentication.
+    Include the token in the Authorization header: `Authorization: Bearer <token>`
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@example.com
+
+servers:
+  - url: http://localhost:5000/api/v1
+    description: Local development server
+  - url: https://api.example.com/api/v1
+    description: Production server
+
+tags:
+  - name: Authentication
+    description: Tenant-based authentication endpoints
+  - name: Campaigns
+    description: Campaign management endpoints
+  - name: Conversations
+    description: Conversation processing endpoints
+  - name: Jobs
+    description: Job status endpoints (for future async processing)
+  - name: Q&A
+    description: Question & Answer endpoints
+
+paths:
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: Tenant Login
+      description: Authenticate tenant user and receive JWT token
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              tenant_id: "tenant_001"
+              username: "admin"
+              password: "password123"
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              example:
+                access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                token_type: "bearer"
+                expires_in: 3600
+                tenant_id: "tenant_001"
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Invalid credentials"
+                message: "Invalid tenant_id, username, or password"
+
+  /campaigns:
+    get:
+      tags:
+        - Campaigns
+      summary: List Campaigns
+      description: Get list of campaigns for the authenticated tenant
+      operationId: listCampaigns
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+          description: Page number
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: Number of items per page
+      responses:
+        '200':
+          description: List of campaigns
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+    
+    post:
+      tags:
+        - Campaigns
+      summary: Create Campaign
+      description: Create a new campaign
+      operationId: createCampaign
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCampaignRequest'
+            example:
+              name: "Q1 Credit Card Offers"
+              description: "Campaign for Q1 credit card promotions"
+              start_date: "2025-01-01T00:00:00Z"
+              end_date: "2025-03-31T23:59:59Z"
+      responses:
+        '201':
+          description: Campaign created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /campaigns/{campaign_id}:
+    get:
+      tags:
+        - Campaigns
+      summary: Get Campaign Details
+      description: Get details of a specific campaign
+      operationId: getCampaign
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: campaign_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Campaign ID
+      responses:
+        '200':
+          description: Campaign details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /conversations/process:
+    post:
+      tags:
+        - Conversations
+      summary: Process Conversations
+      description: |
+        Process conversation transcriptions for sentiment analysis.
+        
+        **Note**: The `async` parameter is reserved for future implementation.
+        Currently, all processing is synchronous. If `async=true` is provided,
+        the API will return a `501 Not Implemented` error.
+      operationId: processConversations
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: async
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: |
+            Request async processing (future feature).
+            Currently returns 501 Not Implemented if set to true.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProcessConversationRequest'
+            example:
+              transcription:
+                - call_id: "CALL_20250122_001"
+                  campaign_id: "CAMPAIGN_OFFERS_Q1"
+                  timestamp: "2025-01-22T14:30:00Z"
+                  duration_seconds: 420
+                  bot_name: "OfferBot_v2"
+                  conversation:
+                    - speaker: "bot"
+                      timestamp: 0
+                      text: "Hello, thank you for calling. I'm calling regarding our premium credit card offer..."
+                    - speaker: "customer"
+                      timestamp: 2
+                      text: "Yeah, okay, I'm interested. Tell me more about the benefits."
+                  metadata:
+                    customer_id: "CUST_12345"
+                    campaign_segment: "premium_tier"
+                    interaction_outcome: "pending_decision"
+      responses:
+        '200':
+          description: Processing completed (sync mode)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessConversationSyncResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '501':
+          description: Async processing not yet implemented
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Not Implemented"
+                message: "Async processing is a planned feature and will be available in a future release"
+                current_mode: "sync"
+
+  /conversations/{call_id}/qa:
+    post:
+      tags:
+        - Q&A
+      summary: Ask Question About Conversation
+      description: Ask a question about a processed conversation transcript
+      operationId: askQuestion
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Call ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QARequest'
+            example:
+              question:
+                text: "What was the main concern raised by the customer?"
+      responses:
+        '200':
+          description: Answer provided
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QAResponse'
+        '404':
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Conversation not found"
+                message: "No conversation found for call_id: CALL_20250122_001"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /jobs/{job_id}/status:
+    get:
+      tags:
+        - Jobs
+      summary: Get Job Status (Future Feature)
+      description: |
+        Get the status of an async processing job.
+        
+        **Note**: This endpoint is reserved for future async processing implementation.
+        Currently returns `501 Not Implemented`.
+      operationId: getJobStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Job ID
+      responses:
+        '200':
+          description: Job status (when implemented)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobStatusResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '501':
+          description: Not yet implemented
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Not Implemented"
+                message: "Async processing is a planned feature and will be available in a future release"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /auth/login endpoint
+
+  schemas:
+    LoginRequest:
+      type: object
+      required:
+        - tenant_id
+        - username
+        - password
+      properties:
+        tenant_id:
+          type: string
+          description: Tenant identifier
+          example: "tenant_001"
+        username:
+          type: string
+          description: Username
+          example: "admin"
+        password:
+          type: string
+          format: password
+          description: Password
+          example: "password123"
+
+    LoginResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT access token
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        token_type:
+          type: string
+          example: "bearer"
+        expires_in:
+          type: integer
+          description: Token expiration time in seconds
+          example: 3600
+        tenant_id:
+          type: string
+          example: "tenant_001"
+
+    CreateCampaignRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Campaign name
+          example: "Q1 Credit Card Offers"
+        description:
+          type: string
+          description: Campaign description
+          example: "Campaign for Q1 credit card promotions"
+        start_date:
+          type: string
+          format: date-time
+          description: Campaign start date (ISO8601)
+          example: "2025-01-01T00:00:00Z"
+        end_date:
+          type: string
+          format: date-time
+          description: Campaign end date (ISO8601)
+          example: "2025-03-31T23:59:59Z"
+
+    CampaignResponse:
+      type: object
+      properties:
+        campaign_id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        name:
+          type: string
+          example: "Q1 Credit Card Offers"
+        description:
+          type: string
+          example: "Campaign for Q1 credit card promotions"
+        tenant_id:
+          type: string
+          example: "tenant_001"
+        created_at:
+          type: string
+          format: date-time
+          example: "2025-01-22T10:00:00Z"
+        status:
+          type: string
+          enum: [active, inactive, archived]
+          example: "active"
+
+    CampaignDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/CampaignResponse'
+        - type: object
+          properties:
+            conversation_count:
+              type: integer
+              description: Number of conversations in this campaign
+              example: 10
+
+    CampaignListResponse:
+      type: object
+      properties:
+        campaigns:
+          type: array
+          items:
+            $ref: '#/components/schemas/CampaignResponse'
+        total:
+          type: integer
+          example: 100
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+
+    ProcessConversationRequest:
+      type: object
+      required:
+        - transcription
+      properties:
+        transcription:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Transcription'
+
+    Transcription:
+      type: object
+      required:
+        - call_id
+        - campaign_id
+        - timestamp
+        - duration_seconds
+        - bot_name
+        - conversation
+      properties:
+        call_id:
+          type: string
+          description: Unique identifier for the call (must be unique per tenant)
+          example: "CALL_20250122_001"
+        campaign_id:
+          type: string
+          description: Campaign identifier (must exist for the tenant)
+          example: "CAMPAIGN_OFFERS_Q1"
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO8601 datetime of the call
+          example: "2025-01-22T14:30:00Z"
+        duration_seconds:
+          type: number
+          minimum: 0
+          description: Call duration in seconds
+          example: 420
+        bot_name:
+          type: string
+          description: Name/version of the bot
+          example: "OfferBot_v2"
+        conversation:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ConversationTurn'
+        metadata:
+          type: object
+          description: Optional metadata
+          additionalProperties: true
+          example:
+            customer_id: "CUST_12345"
+            campaign_segment: "premium_tier"
+            interaction_outcome: "pending_decision"
+
+    ConversationTurn:
+      type: object
+      required:
+        - speaker
+        - timestamp
+        - text
+      properties:
+        speaker:
+          type: string
+          enum: [bot, customer]
+          description: Speaker identifier
+          example: "bot"
+        timestamp:
+          type: number
+          minimum: 0
+          description: Timestamp within the call (in seconds)
+          example: 0
+        text:
+          type: string
+          description: The spoken text
+          example: "Hello, thank you for calling. I'm calling regarding our premium credit card offer..."
+
+    ProcessConversationSyncResponse:
+      type: object
+      properties:
+        job_id:
+          type: string
+          format: uuid
+          example: "660e8400-e29b-41d4-a716-446655440001"
+        status:
+          type: string
+          enum: [completed]
+          example: "completed"
+        processed_at:
+          type: string
+          format: date-time
+          example: "2025-01-22T15:45:00Z"
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProcessingResult'
+
+    ProcessingResult:
+      type: object
+      properties:
+        call_id:
+          type: string
+          example: "CALL_20250122_001"
+        campaign_id:
+          type: string
+          example: "CAMPAIGN_OFFERS_Q1"
+        status:
+          type: string
+          enum: [completed, failed]
+          example: "completed"
+        result:
+          $ref: '#/components/schemas/SentimentAnalysisOutput'
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+
+    SentimentAnalysisOutput:
+      type: object
+      properties:
+        report_metadata:
+          $ref: '#/components/schemas/ReportMetadata'
+        call_details:
+          $ref: '#/components/schemas/CallDetails'
+        quality_analysis:
+          $ref: '#/components/schemas/QualityAnalysis'
+        summary_insights:
+          $ref: '#/components/schemas/SummaryInsights'
+
+    ReportMetadata:
+      type: object
+      properties:
+        report_id:
+          type: string
+          example: "REPORT_20250122_001"
+        generated_at:
+          type: string
+          format: date-time
+          example: "2025-01-22T15:45:00Z"
+        campaign_id:
+          type: string
+          example: "CAMPAIGN_OFFERS_Q1"
+        transcription_count:
+          type: integer
+          example: 1
+        analysis_duration_ms:
+          type: integer
+          example: 2340
+
+    CallDetails:
+      type: object
+      properties:
+        call_id:
+          type: string
+          example: "CALL_20250122_001"
+        duration:
+          type: string
+          example: "7m 2s"
+        sentiment_trend:
+          type: string
+          example: "positive_increasing"
+        bot_performance_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 10
+          example: 8.2
+        customer_engagement_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 10
+          example: 8.5
+
+    QualityAnalysis:
+      type: object
+      properties:
+        metrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/QualityMetric'
+
+    QualityMetric:
+      type: object
+      properties:
+        question_id:
+          type: string
+          example: "Q001"
+        question:
+          type: string
+          example: "Was the call focused on the campaign topic?"
+        answer:
+          oneOf:
+            - type: string
+            - type: number
+          example: "Yes"
+        answer_type:
+          type: string
+          enum: [boolean, categorical, numeric, boolean_with_details]
+          example: "boolean"
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          example: 0.94
+        supporting_evidence:
+          type: array
+          items:
+            type: string
+          example:
+            - "Bot mentioned credit card benefits (timestamp: 0-120s)"
+            - "Discussion focused on offer details for 6+ minutes"
+        sentiment_score:
+          type: number
+          format: float
+          example: 0.78
+        sentiment_trajectory:
+          type: array
+          items:
+            $ref: '#/components/schemas/SentimentTrajectory'
+        new_requests:
+          type: array
+          items:
+            type: string
+          example:
+            - "Annual fee waiver eligibility"
+        unresolved_count:
+          type: integer
+          example: 1
+        time_breakdown:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            main_offer: "5m 2s"
+            additional_queries: "1m 23s"
+            closing: "0m 37s"
+            total: "7m 2s"
+        interest_level:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          example: 0.82
+        next_steps:
+          type: string
+          example: "Customer requested product comparison; likely to convert"
+        conversion_probability:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          example: 0.75
+
+    SentimentTrajectory:
+      type: object
+      properties:
+        segment:
+          type: string
+          example: "Opening"
+        sentiment:
+          type: string
+          example: "neutral"
+
+    SummaryInsights:
+      type: object
+      properties:
+        overall_quality_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 10
+          example: 8.35
+        strengths:
+          type: array
+          items:
+            type: string
+          example:
+            - "Excellent topic alignment with campaign"
+            - "Strong customer engagement and positive sentiment"
+        areas_for_improvement:
+          type: array
+          items:
+            type: string
+          example:
+            - "Could have proactively addressed APR comparison"
+        recommendations:
+          type: array
+          items:
+            type: string
+          example:
+            - "Escalate for product comparison follow-up"
+
+    QARequest:
+      type: object
+      required:
+        - question
+      properties:
+        question:
+          $ref: '#/components/schemas/Question'
+
+    Question:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          description: The question text
+          example: "What was the main concern raised by the customer?"
+
+    QAResponse:
+      type: object
+      properties:
+        call_id:
+          type: string
+          example: "CALL_20250122_001"
+        question:
+          type: object
+          properties:
+            text:
+              type: string
+              example: "What was the main concern raised by the customer?"
+            detected_type:
+              type: string
+              enum: [boolean, categorical, numeric, textual]
+              example: "textual"
+        answer:
+          $ref: '#/components/schemas/Answer'
+        answered_at:
+          type: string
+          format: date-time
+          example: "2025-01-22T16:00:00Z"
+
+    Answer:
+      type: object
+      properties:
+        text:
+          type: string
+          description: The answer text with embedded context/details
+          example: "Yes (94% keyword coverage, strong focus on credit card benefits throughout)"
+        type:
+          type: string
+          enum: [boolean, categorical, numeric, textual]
+          example: "boolean"
+
+    JobStatusResponse:
+      type: object
+      description: Job status response (for future async processing)
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [processing, completed, failed]
+        submitted_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        transcription_count:
+          type: integer
+        processed_count:
+          type: integer
+        failed_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProcessingResult'
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error type
+          example: "Validation error"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Input data validation failed"
+        details:
+          type: object
+          description: Additional error details
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          example:
+            "transcription[0].call_id": ["Field is required"]
+            "transcription[0].conversation[1].speaker": ["Invalid speaker value. Must be 'bot' or 'customer'"]
+
+    ErrorDetail:
+      type: object
+      properties:
+        message:
+          type: string
+        code:
+          type: string
+
+  responses:
+    UnauthorizedError:
+      description: Unauthorized - Invalid or missing token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Unauthorized"
+            message: "Invalid or expired token"
+
+    ValidationError:
+      description: Bad Request - Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Validation error"
+            message: "Input data validation failed"
+            details:
+              "transcription[0].call_id": ["Field is required"]
+
+    NotFoundError:
+      description: Not Found - Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Not Found"
+            message: "Resource not found"
+
